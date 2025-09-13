@@ -22,8 +22,6 @@ It generates clean, fixed-width aligned text files with user-selectable output c
   - File picker with Desktop as default directory.  
   - Checkbox controls under an *Outputs* label.  
   - Extract button for saving output.  
-- **Absolute icon loading**:  
-  - Uses `icon.ico` from the same folder as the program.  
 
 ---
 
