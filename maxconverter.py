@@ -1,8 +1,8 @@
 """
-MaxConverter – Photometric Log Extractor
+MaxConverter
 ----------------------------------------
-Author: [Your Name or Organization]
-License: MIT (or choose one)
+Author: Antonino Brosio (www.antoninobrosio.it)
+License: GNU GENERAL PUBLIC LICENSE
 Description:
     PyQt5 GUI application for extracting photometric log data (HJD, MAG, MAG_ERR, etc.)
     from CSV/TXT files (e.g. MaximDL output). Provides fixed-width aligned output
@@ -14,11 +14,15 @@ Features:
     - GUI: file picker, checkboxes for optional columns, extract button.
     - Defaults: HJD, MAG, MAG_ERR always enabled by default.
     - Icon: uses local icon.ico in the same folder as the script.
+    - Optional observer codes: MPC and/or AAVSO fields; when provided, default
+      output filename becomes BASE_YYYYMMDD_AAVSO.txt or BASE_YYYYMMDD_MPC.txt
+      (otherwise BASE_YYYYMMDD.txt).
 """
 
 import os
 import sys
 import re
+from datetime import date
 from pathlib import Path
 from typing import List
 
@@ -138,7 +142,8 @@ def format_table(rows: List[dict], selected_cols: List[str]) -> str:
 class MainWindow(QtWidgets.QWidget):
     """
     Main application window for MaxConverter.
-    Provides file selection, output column options, and extraction action.
+    Provides file selection, output column options, optional observer codes,
+    and the extraction action.
     """
 
     def __init__(self):
@@ -152,12 +157,12 @@ class MainWindow(QtWidgets.QWidget):
             self.setWindowIcon(QtGui.QIcon(icon_path))
 
         # Window size
-        self.resize(600, 170)
+        self.resize(600, 190)
 
         # --- Input row: file path + browse button ---
         self.input_edit = QtWidgets.QLineEdit(self)
         self.input_edit.setPlaceholderText("Path to CSV/TXT file to convert…")
-        self.browse_btn = QtWidgets.QPushButton("Browse…", self)
+        self.browse_btn = QtWidgets.QPushButton("Browse", self)
         self.browse_btn.clicked.connect(self.on_browse_input)
 
         input_layout = QtWidgets.QHBoxLayout()
@@ -177,6 +182,26 @@ class MainWindow(QtWidgets.QWidget):
             self.checks[col] = cb
             checks_layout.addWidget(cb)
 
+        # Small spacing below checkboxes
+        # (allows a little breathing room before the codes row)
+        codes_top_spacer = QtWidgets.QSpacerItem(0, 5, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Minimum)
+
+        # --- Observer codes (MPC / AAVSO) under checkboxes ---
+        codes_layout = QtWidgets.QHBoxLayout()
+        codes_layout.addWidget(QtWidgets.QLabel("MPC:", self))
+        self.mpc_edit = QtWidgets.QLineEdit(self)
+        self.mpc_edit.setPlaceholderText("MPC code (optional)")
+        self.mpc_edit.setFixedWidth(160)  # slightly longer so placeholder isn't clipped
+        codes_layout.addWidget(self.mpc_edit)
+
+        codes_layout.addSpacing(10)
+        codes_layout.addWidget(QtWidgets.QLabel("AAVSO:", self))
+        self.aavso_edit = QtWidgets.QLineEdit(self)
+        self.aavso_edit.setPlaceholderText("AAVSO code (optional)")
+        self.aavso_edit.setFixedWidth(160)
+        codes_layout.addWidget(self.aavso_edit)
+        codes_layout.addStretch(1)
+
         # --- Extract button ---
         self.extract_btn = QtWidgets.QPushButton("Extract", self)
         self.extract_btn.setEnabled(False)
@@ -190,6 +215,8 @@ class MainWindow(QtWidgets.QWidget):
         layout.addLayout(input_layout)
         layout.addWidget(outputs_label)
         layout.addLayout(checks_layout)
+        layout.addItem(codes_top_spacer)
+        layout.addLayout(codes_layout)
         layout.addSpacing(10)  # push Extract button slightly lower
         layout.addWidget(self.extract_btn, alignment=QtCore.Qt.AlignRight)
 
@@ -212,6 +239,31 @@ class MainWindow(QtWidgets.QWidget):
         )
         if path:
             self.input_edit.setText(path)
+
+    def _default_filename(self, in_path: str) -> str:
+        """
+        Build the default output filename based on the input name and optional codes.
+
+        Rules:
+        - Base is the input stem uppercased, spaces replaced with underscores.
+        - Date is today's date in YYYYMMDD.
+        - If AAVSO code is present: BASE_YYYYMMDD_AAVSO.txt
+        - Else if MPC code is present: BASE_YYYYMMDD_MPC.txt
+        - Else: BASE_YYYYMMDD.txt
+        """
+        in_stem = Path(in_path).stem
+        base = in_stem.upper().replace(" ", "_")
+        date_str = date.today().strftime("%Y%m%d")
+
+        suffix = None
+        if self.aavso_edit.text().strip():
+            suffix = "AAVSO"
+        elif self.mpc_edit.text().strip():
+            suffix = "MPC"
+
+        if suffix:
+            return f"{base}_{date_str}_{suffix}.txt"
+        return f"{base}_{date_str}.txt"
 
     def on_extract(self):
         """Handle the extraction process and save results to a TXT file."""
@@ -238,11 +290,9 @@ class MainWindow(QtWidgets.QWidget):
         # Format output
         text_out = format_table(rows, selected_cols)
 
-        # Suggest default output filename
-        in_stem = Path(in_path).stem
-        default_name = f"{in_stem}_extracted.txt"
+        # Suggest default output filename (Desktop as default directory)
         start_dir = desktop_dir()
-        default_path = str(Path(start_dir) / default_name)
+        default_path = str(Path(start_dir) / self._default_filename(in_path))
 
         # Save dialog
         out_path, _ = QtWidgets.QFileDialog.getSaveFileName(
