@@ -23,5 +23,12 @@ It generates clean, fixed-width aligned text files with user-selectable output c
   - Checkbox controls under an *Outputs* label.  
   - Extract button for saving output.  
 
+## Author
+
+Created by **Antonino Brosio**  
+[www.antoninobrosio.it](http://www.antoninobrosio.it)
+MPC CODE: L90
+AAVSO: BANI
+
 ---
 
