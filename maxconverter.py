@@ -22,7 +22,7 @@ Features:
 import os
 import sys
 import re
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List
 
@@ -51,6 +51,23 @@ def desktop_dir() -> str:
     """
     d = os.path.join(os.path.expanduser("~"), "Desktop")
     return d if os.path.isdir(d) else os.path.expanduser("~")
+
+
+def jd_to_yyyymmdd(jd_value: str) -> str:
+    """Convert a Julian Date string to YYYYMMDD. Returns today if conversion fails."""
+    try:
+        jd = float(str(jd_value).strip())
+        dt = datetime(2000, 1, 1, 12, 0, 0) + timedelta(days=jd - 2451545.0)
+        return dt.strftime("%Y%m%d")
+    except Exception:
+        return date.today().strftime("%Y%m%d")
+
+
+def sanitize_filename_part(value: str) -> str:
+    """Normalize a filename part: uppercase, trim, replace spaces, remove invalid chars."""
+    s = str(value).strip().upper().replace(" ", "_")
+    s = re.sub(r'[^A-Z0-9_\-]+', '', s)
+    return s
 
 
 def parse_line_to_fields(line: str) -> dict:
@@ -157,7 +174,10 @@ class MainWindow(QtWidgets.QWidget):
             self.setWindowIcon(QtGui.QIcon(icon_path))
 
         # Window size
-        self.resize(600, 190)
+        self.resize(720, 190)
+
+        # Enable drag and drop of input files onto the window
+        self.setAcceptDrops(True)
 
         # --- Input row: file path + browse button ---
         self.input_edit = QtWidgets.QLineEdit(self)
@@ -200,6 +220,13 @@ class MainWindow(QtWidgets.QWidget):
         self.aavso_edit.setPlaceholderText("AAVSO code (optional)")
         self.aavso_edit.setFixedWidth(160)
         codes_layout.addWidget(self.aavso_edit)
+
+        codes_layout.addSpacing(10)
+        codes_layout.addWidget(QtWidgets.QLabel("Filter:", self))
+        self.filter_edit = QtWidgets.QLineEdit(self)
+        self.filter_edit.setPlaceholderText("Filter for filename (optional)")
+        self.filter_edit.setFixedWidth(120)
+        codes_layout.addWidget(self.filter_edit)
         codes_layout.addStretch(1)
 
         # --- Extract button ---
@@ -224,6 +251,34 @@ class MainWindow(QtWidgets.QWidget):
     # Slots / Event Handlers
     # ---------------------------
 
+
+    def dragEnterEvent(self, event):
+        """Accept drag-and-drop when it contains at least one local file."""
+        mime = event.mimeData()
+        if mime.hasUrls():
+            for url in mime.urls():
+                if url.isLocalFile() and os.path.isfile(url.toLocalFile()):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def dropEvent(self, event):
+        """Load the first dropped local file into the input field automatically."""
+        mime = event.mimeData()
+        if not mime.hasUrls():
+            event.ignore()
+            return
+
+        for url in mime.urls():
+            if url.isLocalFile():
+                file_path = url.toLocalFile()
+                if os.path.isfile(file_path):
+                    self.input_edit.setText(file_path)
+                    event.acceptProposedAction()
+                    return
+
+        event.ignore()
+
     def on_input_changed(self, text: str):
         """Enable Extract button only if the given path points to a valid file."""
         self.extract_btn.setEnabled(os.path.isfile(text))
@@ -240,30 +295,28 @@ class MainWindow(QtWidgets.QWidget):
         if path:
             self.input_edit.setText(path)
 
-    def _default_filename(self, in_path: str) -> str:
+    def _default_filename(self, in_path: str, rows: List[dict]) -> str:
         """
-        Build the default output filename based on the input name and optional codes.
+        Build the default output filename in the form:
+        OBJECT_YYYYMMDD_FILTER_CODE.txt
 
-        Rules:
-        - Base is the input stem uppercased, spaces replaced with underscores.
-        - Date is today's date in YYYYMMDD.
-        - If AAVSO code is present: BASE_YYYYMMDD_AAVSO.txt
-        - Else if MPC code is present: BASE_YYYYMMDD_MPC.txt
-        - Else: BASE_YYYYMMDD.txt
+        Where:
+        - OBJECT is the input stem uppercased, spaces replaced with underscores
+        - YYYYMMDD is derived from the HJD/JD of the first observation
+        - FILTER is read from the dedicated GUI field
+        - CODE is the AAVSO code if present, otherwise the MPC code
         """
         in_stem = Path(in_path).stem
-        base = in_stem.upper().replace(" ", "_")
-        date_str = date.today().strftime("%Y%m%d")
+        base = sanitize_filename_part(in_stem)
 
-        suffix = None
-        if self.aavso_edit.text().strip():
-            suffix = "AAVSO"
-        elif self.mpc_edit.text().strip():
-            suffix = "MPC"
+        first_hjd = rows[0].get("HJD", "") if rows else ""
+        date_str = jd_to_yyyymmdd(first_hjd)
 
-        if suffix:
-            return f"{base}_{date_str}_{suffix}.txt"
-        return f"{base}_{date_str}.txt"
+        filter_part = sanitize_filename_part(self.filter_edit.text())
+        code_part = sanitize_filename_part(self.aavso_edit.text() or self.mpc_edit.text())
+
+        parts = [p for p in [base, date_str, filter_part, code_part] if p]
+        return "_".join(parts) + ".txt"
 
     def on_extract(self):
         """Handle the extraction process and save results to a TXT file."""
@@ -292,7 +345,7 @@ class MainWindow(QtWidgets.QWidget):
 
         # Suggest default output filename (Desktop as default directory)
         start_dir = desktop_dir()
-        default_path = str(Path(start_dir) / self._default_filename(in_path))
+        default_path = str(Path(start_dir) / self._default_filename(in_path, rows))
 
         # Save dialog
         out_path, _ = QtWidgets.QFileDialog.getSaveFileName(
